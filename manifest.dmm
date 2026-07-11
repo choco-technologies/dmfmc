@@ -1,0 +1,7 @@
+# Include dynamically generated versions list from latest release
+$include https://github.com/choco-technologies/dmfmc/releases/download/vlatest/versions.dmm
+
+# Module entries with version placeholder - will be expanded by $version-available
+dmfmc      https://github.com/choco-technologies/dmfmc/releases/download/v<version>/dmfmc-v<version>-<cpu_family>.zip
+dmfmc_port https://github.com/choco-technologies/dmfmc/releases/download/v<version>/dmfmc_port-v<version>-<cpu_family>.zip
+dmfmc_test https://github.com/choco-technologies/dmfmc/releases/download/v<version>/dmfmc-v<version>-<cpu_family>.zip
