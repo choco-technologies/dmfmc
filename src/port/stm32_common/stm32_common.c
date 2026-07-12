@@ -183,8 +183,8 @@ static uint32_t pick_cas_latency_cycles(const dmfmc_sdram_chip_params_t *chip, u
 #define DMFMC_MPU_SDRAM_REGION  6U
 
 /**
- * @brief Mark the FMC SDRAM window as Strongly Ordered (non-bufferable, non-
- * cacheable) via the MPU.
+ * @brief Mark the FMC SDRAM window as Normal, non-cacheable, non-bufferable
+ * memory via the MPU.
  *
  * Without an explicit MPU region, this address range falls back to the
  * Cortex-M7 default background map, and on this core/board combination that
@@ -192,9 +192,20 @@ static uint32_t pick_cas_latency_cycles(const dmfmc_sdram_chip_params_t *chip, u
  * to nearby addresses in this window - only the last of several rapid
  * consecutive writes actually reached the SDRAM, exactly the "every word
  * reads back as the last one written" corruption this driver hit during
- * bring-up. Marking the region Strongly Ordered forces every store to
- * complete, in order, before the next one begins, matching what ST's own
- * SDRAM examples configure via MPU for the same reason.
+ * bring-up. B=0 (non-bufferable) forces every store to complete, in order,
+ * before the next one begins, which is what actually fixed that corruption.
+ *
+ * This region was originally configured as Strongly Ordered (TEX=000) for
+ * the same B=0/C=0 effect, but ARMv7-M forbids *any* unaligned access to
+ * Strongly-Ordered (or Device) memory - it hard-faults, always, regardless
+ * of the core's normal (non-trapping) unaligned-access support for Normal
+ * memory. That bit us for real once SDRAM was registered as a dmheap
+ * default context: dmod's module loader parses loaded modules' internal
+ * structures (headers/footers) with plain struct-pointer dereferences that
+ * do not guarantee 4-byte alignment of every field, and a module placed in
+ * this SDRAM region hit exactly that fault. TEX=001 (Normal, non-cacheable)
+ * keeps the same non-bufferable/non-cacheable guarantees while permitting
+ * unaligned accesses.
  *
  * Safe to call unconditionally: if the MPU is already enabled by someone
  * else, only a new region is added; if it is not yet enabled, it is enabled
@@ -213,9 +224,15 @@ static void configure_sdram_mpu_region(void)
              | (0U << 16)     /* B = 0: non-bufferable */
              | (0U << 17)     /* C = 0: non-cacheable */
              | (0U << 18)     /* S = 0 */
-             | (0U << 19)     /* TEX = 000 -> together with C=B=0, Strongly Ordered */
-             | (0x3U << 24)   /* AP = 011: full read/write access, any privilege level */
-             | (1U << 28);    /* XN = 1: never execute from this region */
+             | (1U << 19)     /* TEX = 001 -> with C=B=0, Normal non-cacheable (permits unaligned access, unlike Strongly Ordered) */
+             | (0x3U << 24);  /* AP = 011: full read/write access, any privilege level.
+                                * XN deliberately left 0 (executable): when this SDRAM is
+                                * registered as a dmheap default context, dmod's own module
+                                * loader can and does place a position-independent module's
+                                * code+data here (verified on real hardware - a module's
+                                * relocated Main() ended up at a SDRAM address) and calls
+                                * directly into it. Marking this region XN=1 would hard-fault
+                                * the very next module loaded into this heap. */
 
     if ((MPU_CTRL & 0x1U) == 0U)
         MPU_CTRL |= (1U << 0) | (1U << 2); /* ENABLE | PRIVDEFENA */
