@@ -71,8 +71,8 @@ typedef struct
 #define FMC_SDCMR_MODE_LOADMODEREG  0x4U
 #define FMC_SDCMR_MODE_SELFREFRESH  0x5U
 #define FMC_SDCMR_MODE_POWERDOWN    0x6U
-#define FMC_SDCMR_CTB1              (1U << 3)  /**< Command target: bank 1 */
-#define FMC_SDCMR_CTB2              (1U << 4)  /**< Command target: bank 2 */
+#define FMC_SDCMR_CTB2              (1U << 3)  /**< Command target: bank 2 */
+#define FMC_SDCMR_CTB1              (1U << 4)  /**< Command target: bank 1 */
 #define FMC_SDCMR_NRFS_Pos          5U         /**< Number of auto-refresh cycles - 1 */
 #define FMC_SDCMR_NRFS_Msk          (0xFU << FMC_SDCMR_NRFS_Pos)
 #define FMC_SDCMR_MRD_Pos           9U         /**< Mode register value for LOAD MODE REGISTER command */

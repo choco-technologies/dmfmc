@@ -178,6 +178,59 @@ static int read_config_parameters(dmdrvi_context_t context, dmini_context_t conf
 }
 
 /**
+ * @brief Verify the freshly-configured SDRAM actually holds data.
+ *
+ * Writes and reads back a handful of patterns at the start of the mapped
+ * region and (if the region is large enough) at a far offset, using both
+ * 32-bit and 16-bit accesses. This is a permanent part of bring-up, not a
+ * debugging aid: a misconfigured controller/chip on this bus can produce
+ * data that is readable and even self-consistent from software's point of
+ * view (e.g. every address silently aliasing to the same cell) without any
+ * bus fault, so failures here would otherwise only surface much later as
+ * corrupted heap contents.
+ */
+static int verify_sdram_access(const dmfmc_sdram_port_result_t *result)
+{
+    static const uint32_t patterns32[4] = {0xA5A5A5A5U, 0x5A5A5A5AU, 0x12345678U, 0xFEDCBA98U};
+    static const uint16_t patterns16[4] = {0x1111U, 0x2222U, 0x3333U, 0x4444U};
+    volatile uint32_t *near32 = (volatile uint32_t *)result->memory_start;
+    volatile uint16_t *near16 = (volatile uint16_t *)result->memory_start;
+    int ok = 1;
+    int i;
+
+    for (i = 0; i < 4; i++) near32[i] = patterns32[i];
+    for (i = 0; i < 4; i++)
+    {
+        if (near32[i] != patterns32[i]) ok = 0;
+    }
+
+    /* Placed well past the 32-bit test region so the two never overlap. */
+    for (i = 0; i < 4; i++) near16[8 + i] = patterns16[i];
+    for (i = 0; i < 4; i++)
+    {
+        if (near16[8 + i] != patterns16[i]) ok = 0;
+    }
+
+    if (ok && result->memory_size_bytes >= (1U * 1024U * 1024U))
+    {
+        volatile uint32_t *far32 = (volatile uint32_t *)((uint8_t *)result->memory_start
+                                                          + result->memory_size_bytes - sizeof(uint32_t));
+        *far32 = patterns32[2];
+        if (*far32 != patterns32[2]) ok = 0;
+        if (near32[0] != patterns32[0]) ok = 0; /* catches aliasing between near/far addresses */
+    }
+
+    if (!ok)
+    {
+        DMOD_LOG_ERROR("FMC: SDRAM access verification FAILED at %p (%u bytes) - the bus/controller"
+            " configuration for this chip does not hold data correctly\n",
+            result->memory_start, (unsigned)result->memory_size_bytes);
+    }
+
+    return ok ? 0 : -EIO;
+}
+
+/**
  * @brief Apply configuration to the port layer
  */
 static int configure(dmdrvi_context_t context)
@@ -217,6 +270,13 @@ static int configure(dmdrvi_context_t context)
     if (ret != 0)
     {
         DMOD_LOG_ERROR("FMC: failed to program the refresh timer\n");
+        dmfmc_port_unconfigure_sdram(c->bank);
+        return ret;
+    }
+
+    ret = verify_sdram_access(&context->result);
+    if (ret != 0)
+    {
         dmfmc_port_unconfigure_sdram(c->bank);
         return ret;
     }

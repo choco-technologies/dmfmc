@@ -86,11 +86,18 @@ static uint32_t ns_to_cycles(uint32_t ns, uint32_t sdclk_hz)
     return (uint32_t)cycles;
 }
 
-/* Picks the fastest SDCLK = HCLK/{2,3} that does not exceed the chip's
- * maximum rated clock frequency. */
+/* Above this FMC_CLK, CAS latency has to rise from 2 to 3 cycles (see
+ * pick_cas_latency_cycles), and verified on real hardware (STM32F746G-
+ * Discovery, HCLK=216MHz, HCLK/2=108MHz -> CAS=3): reads become unreliable
+ * (both plain and burst, and both 16-bit and 32-bit-wide accesses) unless
+ * the MCU core is also running in PWR Over-Drive mode. This driver has no
+ * visibility into whether Over-Drive is enabled (that is configured on the
+ * clock side, outside this module), so it prefers the slower divider
+ * whenever it still meets the chip's rated frequency - HCLK/3=72MHz keeps
+ * CAS at 2, which was confirmed byte-exact for both access widths. */
 static int pick_sdclk_divider(uint32_t hclk_hz, uint32_t max_chip_hz, uint32_t *out_divider, uint32_t *out_sdclk_hz)
 {
-    static const uint32_t dividers[] = {2U, 3U};
+    static const uint32_t dividers[] = {3U, 2U};
 
     for (size_t i = 0; i < (sizeof(dividers) / sizeof(dividers[0])); i++)
     {
@@ -162,8 +169,62 @@ static uint32_t pick_cas_latency_cycles(const dmfmc_sdram_chip_params_t *chip, u
  * starts zeroed regardless (static storage duration), so there is nothing
  * to reset here. */
 
+/* ARMv7-M MPU registers (Cortex-M4/M7, standard core peripheral - not STM32-
+ * specific, so defined here rather than in stm32_common_regs.h). */
+#define MPU_TYPE    (*(volatile uint32_t *)0xE000ED90UL)
+#define MPU_CTRL    (*(volatile uint32_t *)0xE000ED94UL)
+#define MPU_RNR     (*(volatile uint32_t *)0xE000ED98UL)
+#define MPU_RBAR    (*(volatile uint32_t *)0xE000ED9CUL)
+#define MPU_RASR    (*(volatile uint32_t *)0xE000EDA0UL)
+
+/* Region number for the SDRAM MPU region. Nothing else in this codebase
+ * touches the MPU (grepped for it) - picked a value unlikely to collide with
+ * whatever a future user of the MPU picks first. */
+#define DMFMC_MPU_SDRAM_REGION  6U
+
+/**
+ * @brief Mark the FMC SDRAM window as Strongly Ordered (non-bufferable, non-
+ * cacheable) via the MPU.
+ *
+ * Without an explicit MPU region, this address range falls back to the
+ * Cortex-M7 default background map, and on this core/board combination that
+ * turned out to allow the store buffer to merge/reorder back-to-back writes
+ * to nearby addresses in this window - only the last of several rapid
+ * consecutive writes actually reached the SDRAM, exactly the "every word
+ * reads back as the last one written" corruption this driver hit during
+ * bring-up. Marking the region Strongly Ordered forces every store to
+ * complete, in order, before the next one begins, matching what ST's own
+ * SDRAM examples configure via MPU for the same reason.
+ *
+ * Safe to call unconditionally: if the MPU is already enabled by someone
+ * else, only a new region is added; if it is not yet enabled, it is enabled
+ * here with PRIVDEFENA set so every other address range keeps using the
+ * default background map exactly as before.
+ */
+static void configure_sdram_mpu_region(void)
+{
+    if (MPU_TYPE == 0U)
+        return; /* No MPU on this part - nothing to configure. */
+
+    MPU_RNR  = DMFMC_MPU_SDRAM_REGION;
+    MPU_RBAR = STM32_FMC_SDRAM_BANK1_BASE; /* 16MB-aligned; region selected via RNR, so VALID/REGION bits stay 0 */
+    MPU_RASR = (1U << 0)      /* ENABLE */
+             | (23U << 1)     /* SIZE: 2^(23+1) = 16 MiB, covers this bank's chip capacity */
+             | (0U << 16)     /* B = 0: non-bufferable */
+             | (0U << 17)     /* C = 0: non-cacheable */
+             | (0U << 18)     /* S = 0 */
+             | (0U << 19)     /* TEX = 000 -> together with C=B=0, Strongly Ordered */
+             | (0x3U << 24)   /* AP = 011: full read/write access, any privilege level */
+             | (1U << 28);    /* XN = 1: never execute from this region */
+
+    if ((MPU_CTRL & 0x1U) == 0U)
+        MPU_CTRL |= (1U << 0) | (1U << 2); /* ENABLE | PRIVDEFENA */
+}
+
 dmod_dmfmc_port_api_declaration(1.0, int, _init, ( void ))
 {
+    configure_sdram_mpu_region();
+
     volatile FMC_RCC_TypeDef *RCC = (FMC_RCC_TypeDef *)STM32_FMC_RCC_BASE;
     RCC->AHB3ENR |= RCC_AHB3ENR_FMCEN;
     (void)RCC->AHB3ENR; /* barrier: ensure the clock is on before the FMC is touched */
@@ -207,9 +268,20 @@ dmod_dmfmc_port_api_declaration(1.0, int, _configure_sdram,
     if (chip->number_of_banks > 2U) sdcr |= FMC_SDCR_NB;
     sdcr |= ((cas_cycles & 0x3U) << FMC_SDCR_CAS_Pos);
 
-    /* SDCLK divider and burst-read are shared fields that only take effect
-     * from SDCR1, regardless of which bank they are written through. */
-    uint32_t shared_cr = ((divider & 0x3U) << FMC_SDCR_SDCLK_Pos) | (chip->use_burst_read ? FMC_SDCR_RBURST : 0U);
+    /* SDCLK divider, burst-read and RPIPE are shared fields that only take
+     * effect from SDCR1, regardless of which bank they are written through.
+     *
+     * RPIPE adds HCLK cycles of delay before the FMC samples read data
+     * coming back from the SDRAM, to cover round-trip propagation delay.
+     * Verified on real hardware (STM32F746G-Discovery): at FMC_CLK=108MHz,
+     * RPIPE=0 makes every read return the data from the *next* 16-bit bus
+     * transaction instead of the addressed one (a reproducible 1-halfword
+     * shift). RPIPE=1 corrects this. ChocoOS runs the same chip at a lower
+     * FMC_CLK (100.5MHz) where RPIPE=0 still has enough margin, which is why
+     * comparing against its register dump alone missed this. */
+    uint32_t shared_cr = ((divider & 0x3U) << FMC_SDCR_SDCLK_Pos)
+                        | (chip->use_burst_read ? FMC_SDCR_RBURST : 0U)
+                        | ((sdclk_hz > 90000000U) ? (1U << FMC_SDCR_RPIPE_Pos) : 0U);
 
     if (bank == dmfmc_sdram_bank_1)
     {
@@ -251,14 +323,25 @@ dmod_dmfmc_port_api_declaration(1.0, int, _configure_sdram,
         FMC->SDTR[0] = (FMC->SDTR[0] & ~(FMC_SDTR_TRC_Msk | FMC_SDTR_TRP_Msk)) | shared_tr;
     }
 
+    /* The FMC decodes the same number of row/column/bank addresses
+     * regardless of MWID - only the amount of data moved per beat changes.
+     * So using fewer data lines than the chip's native width (e.g. 16-bit
+     * on a chip wired for 32-bit) shrinks the actual addressable byte range
+     * accordingly; reporting the chip's raw size_bytes here would let
+     * callers (including this driver's own SDRAM access verification, and
+     * dmheap once it manages this region) read/write past what the
+     * controller actually maps for this bank, which faults on real
+     * hardware. */
+    uint32_t usable_size_bytes = chip->size_bytes / ((uint32_t)chip->data_bus_width / (uint32_t)width);
+
     out_result->configured_frequency_hz = sdclk_hz;
     out_result->cas_latency_cycles = cas_cycles;
     out_result->memory_start = (void *)(uintptr_t)((bank == dmfmc_sdram_bank_1) ? STM32_FMC_SDRAM_BANK1_BASE : STM32_FMC_SDRAM_BANK2_BASE);
-    out_result->memory_size_bytes = chip->size_bytes;
+    out_result->memory_size_bytes = usable_size_bytes;
     out_result->data_bus_width = width;
 
     s_bank_state[idx].configured    = true;
-    s_bank_state[idx].size_bytes    = chip->size_bytes;
+    s_bank_state[idx].size_bytes    = usable_size_bytes;
     s_bank_state[idx].sdclk_hz      = sdclk_hz;
     s_bank_state[idx].data_bus_width = width;
 
@@ -287,10 +370,21 @@ dmod_dmfmc_port_api_declaration(1.0, int, _sdram_send_command,
     if (bank_index(bank, &idx) != 0)
         return -EINVAL;
 
+    /* "Normal" is a pure software bookkeeping placeholder between real JEDEC
+     * commands (used by chip bring-up sequences for the NOP steps the
+     * standard requires) - it must NOT write FMC_SDCMR at all. Writing
+     * MODE=Normal for real, even with CTB1/2 set, tells the FMC's command
+     * sequencer to end the current command-mode session, which - issued
+     * between EnableClock and PrechargeAll, before the chip has actually
+     * completed bring-up - was corrupting every subsequent access (this is
+     * not theoretical: this exact bug caused every read/write on this board
+     * to alias to the same location until this was found). */
+    if (command == dmfmc_sdram_command_normal)
+        return 0;
+
     uint32_t mode;
     switch (command)
     {
-        case dmfmc_sdram_command_normal:            mode = FMC_SDCMR_MODE_NORMAL;      break;
         case dmfmc_sdram_command_enable_clock:      mode = FMC_SDCMR_MODE_CLK_ENABLE;  break;
         case dmfmc_sdram_command_precharge_all:     mode = FMC_SDCMR_MODE_PALL;        break;
         case dmfmc_sdram_command_auto_refresh:      mode = FMC_SDCMR_MODE_AUTOREFRESH; break;
@@ -348,16 +442,17 @@ dmod_dmfmc_port_api_declaration(1.0, int, _finish_sdram_initialization,
      * application-note formula for FMC_SDRTR (the -20 cycle margin accounts
      * for worst-case interrupt/refresh-request latency).
      *
-     * When the configured data bus is narrower than the chip's native width
-     * (e.g. a 32-bit chip wired through only 16 data lines), divide the row
-     * count by that ratio, matching a previously verified driver for this
-     * exact scenario - without this, refresh runs too infrequently and the
-     * SDRAM's contents decay over time even though initial configuration and
-     * the JEDEC bring-up sequence both appear to succeed. */
+     * Deliberately NOT adjusted for a narrower-than-native configured data
+     * bus width: the number of physical rows requiring periodic refresh is a
+     * property of the chip's internal array (fixed at manufacture), not of
+     * how many data lines happen to be wired to the MCU - the datasheet's
+     * "64ms per 4096 rows" retention spec does not change because you read
+     * back fewer bits per column access. An earlier version of this function
+     * divided the row count by the bus-width ratio (copied from a reference
+     * driver that uses that same ratio elsewhere, for derating usable
+     * address space - a different, unrelated calculation) - that halved the
+     * refresh rate instead of the intended fix, making retention worse. */
     uint32_t rows = 1U << chip->number_of_row_address_bits;
-    uint32_t width_ratio = (uint32_t)chip->data_bus_width / (uint32_t)s_bank_state[idx].data_bus_width;
-    if (width_ratio > 1U)
-        rows /= width_ratio;
 
     uint64_t count = ((uint64_t)chip->auto_refresh_period_us * (uint64_t)s_bank_state[idx].sdclk_hz)
                      / ((uint64_t)rows * 1000000ULL);

@@ -13,14 +13,15 @@ static int initialize_mt48lc4m32b2(dmfmc_sdram_bank_t bank, const dmfmc_sdram_ch
     int ret;
 
     /* 1-5. Apply power, hold CKE low, provide a stable clock, then wait at
-     * least 100us before any command other than COMMAND INHIBIT/NOP. */
+     * least 100us before any command other than COMMAND INHIBIT/NOP.
+     * NOP/INHIBIT themselves are pure software bookkeeping (no register
+     * write - see dmfmc_port_sdram_send_command's handling of
+     * dmfmc_sdram_command_normal) so there is nothing to issue here beyond
+     * the delay itself. */
     ret = dmfmc_port_sdram_send_command(bank, dmfmc_sdram_command_enable_clock, NULL, 100U);
     if (ret != 0) return ret;
 
     dmfmc_port_busy_wait_us(100U);
-
-    ret = dmfmc_port_sdram_send_command(bank, dmfmc_sdram_command_normal, NULL, 100U);
-    if (ret != 0) return ret;
 
     /* 6-7. Precharge all banks, then wait at least tRP. */
     ret = dmfmc_port_sdram_send_command(bank, dmfmc_sdram_command_precharge_all, &data, 100U);
@@ -77,6 +78,11 @@ const dmfmc_chip_info_t dmfmc_chip_info_mt48lc4m32b2 = {
         .min_self_refresh_period_ns      = 70U,  /* tRAS */
         .exit_self_refresh_delay_ns      = 70U,  /* tXSR */
         .cycles_to_delay_after_load_mode = 2U,   /* tMRD */
+        /* Verified on real hardware (STM32F746G-Discovery): RBURST=1 is fine
+         * at FMC_CLK=72MHz/CAS=2 (byte-exact for both 16- and 32-bit-wide
+         * accesses), but corrupts reads at FMC_CLK=108MHz/CAS=3 without PWR
+         * Over-Drive enabled - see pick_sdclk_divider(), which now avoids
+         * that faster-but-unreliable clock for this reason. */
         .use_burst_read                  = true,
     },
 };
