@@ -39,7 +39,8 @@ speed=maximum
 output_circuit=push_pull
 
 ; ... one such section per FMC pin (SDCKE0, SDNE0, SDNRAS, SDNCAS, SDNWE,
-; BA0-1, A0-11, D0-31, NBL0-3) ...
+; BA0-1, A0-11, D0-15, NBL0-3 - D16-D31 are deliberately NOT muxed to FMC on
+; this board, see below) ...
 
 [sdram]
 driver_name=dmfmc
@@ -47,11 +48,20 @@ driver_order=2
 memory_type=sdram
 chip=MT48LC4M32B2
 bank=1
-data_bus_width=32
+data_bus_width=16
 timeout_ms=3000
 heap_usage=heap
 heap_alignment=4
 ```
+
+**Why 16-bit, not the chip's native 32-bit:** on the STM32F746G-Discovery,
+MCU pins PH8-15/PI0-3/PI6-7/PI9-10 (which would carry FMC_D16-D31) are used
+for other on-board peripherals, not wired to the SDRAM chip. Configuring
+`data_bus_width=32` here would make the FMC controller drive/expect data on
+pins that aren't actually connected to the chip, corrupting every access
+with whatever floats on those disconnected lines. This was confirmed against
+a previously working driver for this exact board, which mux only D0-D15 and
+explicitly force 16-bit width for the same reason.
 
 ## Configuration Keys (`[sdram]` section)
 
@@ -70,4 +80,4 @@ heap_alignment=4
 
 | Board | Folder | Chip | Bank | Bus Width |
 |-------|--------|------|------|-----------|
-| STM32F746G-DISCO | `board/stm32f746g-disco/` | MT48LC4M32B2 (128 Mbit) | 1 | 32-bit |
+| STM32F746G-DISCO | `board/stm32f746g-disco/` | MT48LC4M32B2 (128 Mbit) | 1 | 16-bit (board-limited; chip is natively 32-bit) |

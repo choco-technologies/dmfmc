@@ -21,7 +21,7 @@ dmod_dmfmc_port_api(1.0, int, _unconfigure_sdram, ( dmfmc_sdram_bank_t bank ) );
 /**
  * Sends a single JEDEC-level command to the SDRAM controller and waits (up to
  * timeout_ms) for the controller to report it is no longer busy. Used by a
- * chip's dmfmc_chip_init_function_t to run its bring-up sequence.
+ * chip's bring-up sequence (see dmfmc_chips_run_init_sequence()).
  */
 dmod_dmfmc_port_api(1.0, int, _sdram_send_command,
     ( dmfmc_sdram_bank_t bank, dmfmc_sdram_command_t command,
@@ -29,7 +29,7 @@ dmod_dmfmc_port_api(1.0, int, _sdram_send_command,
 
 /**
  * Programs the auto-refresh timer once the chip's JEDEC bring-up sequence has
- * completed. Must be called last, after dmfmc_chip_init_function_t returns.
+ * completed. Must be called last, after dmfmc_chips_run_init_sequence() returns.
  */
 dmod_dmfmc_port_api(1.0, int, _finish_sdram_initialization,
     ( dmfmc_sdram_bank_t bank, const dmfmc_sdram_chip_params_t *chip ) );

@@ -1,6 +1,7 @@
 #include "dmfmc_chips.h"
 #include "dmfmc_port.h"
 #include <string.h>
+#include <errno.h>
 
 /* ---- JEDEC bring-up sequences ---- */
 
@@ -54,6 +55,7 @@ static int initialize_mt48lc4m32b2(dmfmc_sdram_bank_t bank, const dmfmc_sdram_ch
 const dmfmc_chip_info_t dmfmc_chip_info_mt48lc4m32b2 = {
     .memory_type = dmfmc_memory_type_sdram,
     .name        = "MT48LC4M32B2",
+    .chip_id     = dmfmc_chip_id_mt48lc4m32b2,
     .params.sdram = {
         .size_bytes                      = 16U * 1024U * 1024U,  /* 128 Mbit = 4M x 32 */
         .bank_size_bytes                 = 4U * 1024U * 1024U,
@@ -77,14 +79,17 @@ const dmfmc_chip_info_t dmfmc_chip_info_mt48lc4m32b2 = {
         .cycles_to_delay_after_load_mode = 2U,   /* tMRD */
         .use_burst_read                  = true,
     },
-    .init_function = initialize_mt48lc4m32b2,
 };
 
-/* ---- Lookup ---- */
-
-static const dmfmc_chip_info_t *const s_known_chips[] = {
-    &dmfmc_chip_info_mt48lc4m32b2,
-};
+/* ---- Lookup ----
+ *
+ * Deliberately not an array of pointers to per-chip const globals (e.g.
+ * `static const dmfmc_chip_info_t *const table[] = { &dmfmc_chip_info_x };`):
+ * that bakes each chip's address into `table`'s own static initializer,
+ * which suffers from exactly the relocation problem chip_id was introduced
+ * to avoid. Comparing against each known chip by name and returning
+ * `&dmfmc_chip_info_x` directly computes that address fresh at runtime
+ * instead. Add an `else if` per new chip. */
 
 /* strcasecmp()/tolower() pull in libc tables (_ctype_) that are not linked
  * into these embedded builds - fold ASCII case by hand instead. */
@@ -109,10 +114,22 @@ const dmfmc_chip_info_t *dmfmc_chips_find(const char *name)
 {
     if (name == NULL) return NULL;
 
-    for (size_t i = 0; i < (sizeof(s_known_chips) / sizeof(s_known_chips[0])); i++)
-    {
-        if (names_match_ci(s_known_chips[i]->name, name))
-            return s_known_chips[i];
-    }
+    if (names_match_ci(dmfmc_chip_info_mt48lc4m32b2.name, name))
+        return &dmfmc_chip_info_mt48lc4m32b2;
+
     return NULL;
+}
+
+int dmfmc_chips_run_init_sequence(const dmfmc_chip_info_t *chip, dmfmc_sdram_bank_t bank,
+                                   const dmfmc_sdram_port_result_t *result)
+{
+    if (chip == NULL) return -EINVAL;
+
+    switch (chip->chip_id)
+    {
+        case dmfmc_chip_id_mt48lc4m32b2:
+            return initialize_mt48lc4m32b2(bank, &chip->params.sdram, result);
+        default:
+            return -ENOSYS;
+    }
 }

@@ -130,35 +130,44 @@ typedef struct
 } dmfmc_sdram_port_result_t;
 
 /**
- * @brief Chip-specific JEDEC initialization sequence
- *
- * Called once by the common driver right after the FMC controller has been
- * programmed with the chip's timing, to bring the chip itself out of reset
- * (clock enable, precharge-all, auto-refresh cycles, load mode register).
- * The mode register value written to the chip must encode the same CAS
- * latency the port layer actually configured (result->cas_latency_cycles),
- * or the controller and the chip will disagree about read timing.
- *
- * @param bank      Bank the chip was configured on
- * @param params    Chip parameters (same struct passed to configuration)
- * @param result    Result reported back by dmfmc_port_configure_sdram()
- * @return 0 on success, negative errno on failure
+ * @brief Maximum length (excluding the null terminator) of a chip name
  */
-typedef int (*dmfmc_chip_init_function_t)(dmfmc_sdram_bank_t bank, const dmfmc_sdram_chip_params_t *params,
-                                           const dmfmc_sdram_port_result_t *result);
+#define DMFMC_CHIP_NAME_MAX_LEN   23
+
+/**
+ * @brief Identifies which JEDEC bring-up sequence a chip database entry uses
+ *
+ * Dispatched by dmfmc_chips_run_init_sequence() (see dmfmc_chips.h). This
+ * exists instead of a stored function pointer because dmod modules are
+ * linked as a flat, fixed-base image with no load-time relocation of data:
+ * a function pointer baked into a `const` initializer holds the correct
+ * address only if the module happens to load at its link-time-assumed base,
+ * which does not hold in general. An enum dispatched through a switch
+ * statement compiles to an ordinary PC-relative call, which is safe
+ * regardless of where the module ends up loaded.
+ */
+typedef enum
+{
+    dmfmc_chip_id_mt48lc4m32b2,
+} dmfmc_chip_id_t;
 
 /**
  * @brief Describes a known external memory chip
+ *
+ * Every field here is plain data (no pointers) for the same reason
+ * dmfmc_chip_id_t exists instead of a function pointer: this struct is
+ * meant to be a `static const` compile-time constant, and only plain data
+ * survives being loaded at a different address than it was linked for.
  */
 typedef struct
 {
-    dmfmc_memory_type_t  memory_type;    /**< Memory family (only sdram is currently usable) */
-    const char           *name;          /**< Chip name, matched against the "chip" INI key */
+    dmfmc_memory_type_t  memory_type;                    /**< Memory family (only sdram is currently usable) */
+    char                 name[DMFMC_CHIP_NAME_MAX_LEN + 1]; /**< Chip name, matched against the "chip" INI key */
+    dmfmc_chip_id_t      chip_id;                         /**< Selects the JEDEC bring-up sequence to run */
     union
     {
         dmfmc_sdram_chip_params_t sdram; /**< Valid when memory_type == dmfmc_memory_type_sdram */
     } params;
-    dmfmc_chip_init_function_t init_function; /**< JEDEC bring-up sequence, may be NULL */
 } dmfmc_chip_info_t;
 
 /**

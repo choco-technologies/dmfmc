@@ -21,4 +21,20 @@ extern const dmfmc_chip_info_t dmfmc_chip_info_mt48lc4m32b2;
  */
 const dmfmc_chip_info_t *dmfmc_chips_find(const char *name);
 
+/**
+ * @brief Run a chip's JEDEC bring-up sequence
+ *
+ * Dispatches on chip->chip_id to the matching bring-up sequence (clock
+ * enable, precharge-all, auto-refresh cycles, load mode register). Must be
+ * called after dmfmc_port_configure_sdram() has already programmed the
+ * controller for this bank, and before dmfmc_port_finish_sdram_initialization().
+ *
+ * @param chip   Chip descriptor, as returned by dmfmc_chips_find()
+ * @param bank   Bank the chip was configured on
+ * @param result Result reported back by dmfmc_port_configure_sdram()
+ * @return 0 on success, negative errno on failure (-ENOSYS if chip->chip_id is unknown)
+ */
+int dmfmc_chips_run_init_sequence(const dmfmc_chip_info_t *chip, dmfmc_sdram_bank_t bank,
+                                   const dmfmc_sdram_port_result_t *result);
+
 #endif /* DMFMC_CHIPS_H */

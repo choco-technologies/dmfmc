@@ -346,8 +346,19 @@ dmod_dmfmc_port_api_declaration(1.0, int, _finish_sdram_initialization,
 
     /* COUNT = (refresh period / number of rows) * SDCLK - 20, per ST's
      * application-note formula for FMC_SDRTR (the -20 cycle margin accounts
-     * for worst-case interrupt/refresh-request latency). */
+     * for worst-case interrupt/refresh-request latency).
+     *
+     * When the configured data bus is narrower than the chip's native width
+     * (e.g. a 32-bit chip wired through only 16 data lines), divide the row
+     * count by that ratio, matching a previously verified driver for this
+     * exact scenario - without this, refresh runs too infrequently and the
+     * SDRAM's contents decay over time even though initial configuration and
+     * the JEDEC bring-up sequence both appear to succeed. */
     uint32_t rows = 1U << chip->number_of_row_address_bits;
+    uint32_t width_ratio = (uint32_t)chip->data_bus_width / (uint32_t)s_bank_state[idx].data_bus_width;
+    if (width_ratio > 1U)
+        rows /= width_ratio;
+
     uint64_t count = ((uint64_t)chip->auto_refresh_period_us * (uint64_t)s_bank_state[idx].sdclk_hz)
                      / ((uint64_t)rows * 1000000ULL);
     count = (count > 20U) ? (count - 20U) : 1U;

@@ -90,7 +90,7 @@ configuration reference, and a guide for adding a new MCU port.
 
 | MCU Series | Status | Notes |
 |-------------|--------|-------|
-| STM32F7     | Implemented | Validated against STM32F746G-Discovery (MT48LC4M32B2 SDRAM). |
+| STM32F7     | Implemented | Targets STM32F746G-Discovery (MT48LC4M32B2 SDRAM); under active hardware bring-up, see `configs/board/stm32f746g-disco/sdram.ini` for the board-specific 16-bit bus note. |
 | STM32F4     | Implemented | Targets F42x/43x/469/479 (the F4 parts with an FMC, not just an FSMC). Not yet validated on real hardware. |
 
 ## Supported Memory Chips
@@ -131,10 +131,14 @@ See [docs/port-implementation.md](docs/port-implementation.md).
 
 ### Adding a New Memory Chip
 
-Add a `dmfmc_chip_info_t` entry to `src/dmfmc_chips.c` with the chip's
-datasheet timing parameters and a JEDEC bring-up function, then register it
-in `s_known_chips[]`. No port-layer changes are required - `dmfmc_port`
-derives every register value from the chip descriptor at configuration time.
+See [docs/configuration.md](docs/configuration.md#adding-a-new-chip). In
+short: add a `dmfmc_chip_info_t` entry to `src/dmfmc_chips.c` with the chip's
+datasheet timing parameters and a JEDEC bring-up function, dispatched by a
+new `dmfmc_chip_id_t` enum value rather than a stored function pointer (dmod
+modules don't support relocating pointers embedded in static data - see
+[docs/api-reference.md](docs/api-reference.md#chip-bring-up-dispatch-dmfmc_chips_run_init_sequence)).
+No port-layer changes are required - `dmfmc_port` derives every register
+value from the chip descriptor at configuration time.
 
 ## License
 

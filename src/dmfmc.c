@@ -205,15 +205,12 @@ static int configure(dmdrvi_context_t context)
         return ret;
     }
 
-    if (c->chip->init_function != NULL)
+    ret = dmfmc_chips_run_init_sequence(c->chip, c->bank, &context->result);
+    if (ret != 0)
     {
-        ret = c->chip->init_function(c->bank, &c->chip->params.sdram, &context->result);
-        if (ret != 0)
-        {
-            DMOD_LOG_ERROR("FMC: chip bring-up sequence failed for '%s'\n", c->chip->name);
-            dmfmc_port_unconfigure_sdram(c->bank);
-            return ret;
-        }
+        DMOD_LOG_ERROR("FMC: chip bring-up sequence failed for '%s'\n", c->chip->name);
+        dmfmc_port_unconfigure_sdram(c->bank);
+        return ret;
     }
 
     ret = dmfmc_port_finish_sdram_initialization(c->bank, &c->chip->params.sdram);
@@ -235,7 +232,17 @@ static int configure(dmdrvi_context_t context)
     {
         context->heap_ctx = dmheap_init(context->result.memory_start, context->result.memory_size_bytes, c->heap_alignment);
         if (context->heap_ctx == NULL)
+        {
             DMOD_LOG_ERROR("FMC: failed to register SDRAM as an additional heap\n");
+        }
+        /* Registering with the default heap list lets ordinary
+         * dmheap_malloc(NULL, ...)/Dmod_Malloc(...) callers spill into this
+         * SDRAM once the internal heap(s) ahead of it in the list are full,
+         * without needing to know this specific heap_ctx pointer. */
+        else if (!dmheap_add_default_context(context->heap_ctx))
+        {
+            DMOD_LOG_ERROR("FMC: failed to add SDRAM heap to the default heap list\n");
+        }
     }
 
     DMOD_LOG_INFO("FMC: '%s' configured on bank %u: %u bytes @ %p, %u Hz\n",
@@ -316,11 +323,20 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, void, _free, ( dmdrvi_context_t cont
         if (context->interrupt_handler_name != NULL || context->config.interrupt_handler != NULL)
             dmfmc_port_remove_interrupt_handler(context);
 
-        dmfmc_port_unconfigure_sdram(context->config.bank);
+        /* Unregister from the default heap list before the backing SDRAM is
+         * unconfigured, so a NULL-context dmheap_malloc()/Dmod_Malloc() call
+         * racing with teardown cannot land in memory that is about to stop
+         * being addressable. dmheap has no API to destroy the heap_ctx
+         * itself, so a pointer handed out via dmfmc_ioctl_cmd_get_heap_context
+         * before this call remains valid to use directly, but must not be
+         * passed to dmheap_add_default_context() again without recreating it. */
+        if (context->heap_ctx != NULL)
+        {
+            dmheap_remove_default_context(context->heap_ctx);
+            context->heap_ctx = NULL;
+        }
 
-        /* dmheap has no teardown API - a heap context handed out via
-         * dmfmc_ioctl_cmd_get_heap_context outlives this driver instance by
-         * design, so it is intentionally not released here. */
+        dmfmc_port_unconfigure_sdram(context->config.bank);
 
         Dmod_Free(context->interrupt_handler_name);
         context->magic = 0;
@@ -414,6 +430,15 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, int, _ioctl, ( dmdrvi_context_t cont
                 context);
 
         case dmfmc_ioctl_cmd_reconfigure:
+            /* configure() creates a fresh heap_ctx unconditionally when
+             * heap_usage requests one; drop the old one from the default
+             * list first so it isn't leaked there once this context's
+             * heap_ctx field is overwritten below. */
+            if (context->heap_ctx != NULL)
+            {
+                dmheap_remove_default_context(context->heap_ctx);
+                context->heap_ctx = NULL;
+            }
             dmfmc_port_unconfigure_sdram(context->config.bank);
             return configure(context);
 

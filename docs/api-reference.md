@@ -35,8 +35,9 @@ const dmfmc_chip_info_t *dmfmc_chips_find(const char *name);
 ```
 
 `dmfmc_chips_find()` performs a case-insensitive lookup against
-`dmfmc_chip_info_t.name` across every entry registered in
-`src/dmfmc_chips.c`'s `s_known_chips[]`.
+`dmfmc_chip_info_t.name`, comparing against each chip descriptor known to
+`src/dmfmc_chips.c` in turn (see the note in that file on why this is a
+chain of comparisons rather than an array of pointers to each chip).
 
 ## Port contract (`dmfmc_port.h`)
 
@@ -55,19 +56,31 @@ application code directly - only by `dmfmc.c` and `dmfmc_chips.c`.
 | `dmfmc_port_add_interrupt_handler(handler, user_ptr)` / `_remove_interrupt_handler(user_ptr)` | Registers for SDRAM refresh-error interrupts. Single global slot - registering a new handler replaces any previous one. |
 | `dmfmc_port_busy_wait_us(us)` | Clock-calibrated busy-wait, used by chip bring-up sequences for sub-millisecond JEDEC delays. |
 
-## Chip bring-up function contract (`dmfmc_chip_init_function_t`)
+## Chip bring-up dispatch (`dmfmc_chips_run_init_sequence`)
 
 ```c
-typedef int (*dmfmc_chip_init_function_t)(dmfmc_sdram_bank_t bank,
-                                           const dmfmc_sdram_chip_params_t *params,
-                                           const dmfmc_sdram_port_result_t *result);
+int dmfmc_chips_run_init_sequence(const dmfmc_chip_info_t *chip, dmfmc_sdram_bank_t bank,
+                                   const dmfmc_sdram_port_result_t *result);
 ```
 
-Called once by `dmfmc.c`'s `configure()`, after
-`dmfmc_port_configure_sdram()` has already programmed the controller. Must
-run its command sequence purely through `dmfmc_port_sdram_send_command()`
-and `dmfmc_port_busy_wait_us()` - it must **not** access any register
-directly, since that would tie the chip database to a specific MCU family.
-`result->cas_latency_cycles` must be encoded into any `LOAD MODE REGISTER`
-command; using a different latency than what the controller was actually
-programmed with will cause silent read corruption.
+Called once by `dmfmc.c`'s `configure()`, after `dmfmc_port_configure_sdram()`
+has already programmed the controller. Dispatches on `chip->chip_id`
+(`dmfmc_chip_id_t`) to a `static` bring-up function in `dmfmc_chips.c` via a
+plain `switch` statement - **not** a stored function pointer. dmod modules
+are linked as a flat, fixed-base image with no load-time relocation of data:
+a function pointer baked into a `static const` initializer only holds the
+right address if the module happens to load at the address it was linked
+for, which does not hold in general (confirmed the hard way - see the git
+history of `dmfmc_chips.c` for the crash this caused). A `switch` on an enum
+compiles to an ordinary PC-relative call, which is safe regardless of where
+the module ends up loaded. The same reasoning is why `dmfmc_chip_info_t.name`
+is a `char[]` rather than a `const char *`, and why `dmfmc_chips_find()`
+compares against each known chip directly instead of walking an array of
+pointers to per-chip globals.
+
+Each bring-up function must run its command sequence purely through
+`dmfmc_port_sdram_send_command()` and `dmfmc_port_busy_wait_us()` - it must
+**not** access any register directly, since that would tie the chip database
+to a specific MCU family. `result->cas_latency_cycles` must be encoded into
+any `LOAD MODE REGISTER` command; using a different latency than what the
+controller was actually programmed with will cause silent read corruption.

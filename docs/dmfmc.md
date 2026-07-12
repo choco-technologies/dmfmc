@@ -50,11 +50,30 @@ them in file order before configuring `dmfmc`, exactly like it does for
    nanosecond timing parameter to SDCLK cycles, and programs
    `FMC_SDCRx`/`FMC_SDTRx`. It reports back the actual frequency, CAS latency
    and mapped address/size in a `dmfmc_sdram_port_result_t`.
-5. The chip's `init_function` (e.g. `initialize_mt48lc4m32b2` in
-   `dmfmc_chips.c`) runs the JEDEC bring-up sequence (clock enable, wait,
-   precharge-all, two auto-refresh cycles, load mode register) purely through
-   `dmfmc_port_sdram_send_command()` / `dmfmc_port_busy_wait_us()` - it never
-   touches a register directly, so it is identical on every MCU family.
+5. `dmfmc_chips_run_init_sequence()` dispatches on `chip->chip_id` to the
+   matching bring-up function (e.g. `initialize_mt48lc4m32b2` in
+   `dmfmc_chips.c`), which runs the JEDEC bring-up sequence (clock enable,
+   wait, precharge-all, two auto-refresh cycles, load mode register) purely
+   through `dmfmc_port_sdram_send_command()` / `dmfmc_port_busy_wait_us()` -
+   it never touches a register directly, so it is identical on every MCU
+   family. Dispatch goes through an enum + `switch`, not a stored function
+   pointer, because dmod modules are linked as a flat, fixed-base image with
+   no load-time data relocation - a function pointer baked into a `static
+   const` initializer would only be valid if the module happened to load at
+   its link-time-assumed address, which is not guaranteed (this is not
+   theoretical: an earlier version of this driver stored the bring-up
+   function as a pointer field and hard-faulted on real hardware the moment
+   it was called, because the module had loaded elsewhere in RAM).
+
+   dmod does provide `DMOD_GLOBAL_POINTER` (`dmod_defs.h`) for exactly this
+   class of problem - a variable marked with it is placed in a `.got`
+   section that `Dmod_Ldr_LoadGot()` fixes up by adding the module's actual
+   load address. It does not help here, though: the attribute applies to a
+   whole top-level pointer *variable* (like `DMOD_Header` in
+   `dmod_header.c.in`), not to individual fields inside a struct, and the
+   pointers that caused the crash (`name`, `init_function`) were struct
+   fields. Restructuring the chip database to hold no pointers at all sidesteps
+   the problem instead of working around it.
 6. `dmfmc_port_finish_sdram_initialization()` programs the refresh timer
    (`FMC_SDRTR`) from the chip's `auto_refresh_period_us`.
 7. If `heap_usage=heap`, the mapped region is handed to `dmheap_init()` as a
