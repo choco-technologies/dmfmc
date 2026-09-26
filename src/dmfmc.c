@@ -328,7 +328,7 @@ int dmod_deinit(void)
 
 /* ---- DMDRVI interface ---- */
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, dmdrvi_context_t, _create, ( dmini_context_t config, dmdrvi_dev_num_t* dev_num ))
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, dmdrvi_context_t, _create, ( dmini_context_t config, dmdrvi_dev_num_t* dev_num ))
 {
     if (config == NULL || dev_num == NULL)
     {
@@ -376,7 +376,7 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, dmdrvi_context_t, _create, ( dmini_c
     return context;
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, void, _free, ( dmdrvi_context_t context ))
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, void, _free, ( dmdrvi_context_t context ))
 {
     if (is_valid_context(context))
     {
@@ -404,8 +404,20 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, void, _free, ( dmdrvi_context_t cont
     }
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, void*, _open, ( dmdrvi_context_t context, int flags ))
+/**
+ * @brief Open the FMC device handle
+ *
+ * @param context DMDRVI context
+ * @param flags Open flags
+ * @param dev_num Unused - dmfmc exposes a single device per context (the
+ * bank configured via dmfmc_dmdrvi_create())
+ *
+ * @return void* Device handle
+ */
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, void*, _open, ( dmdrvi_context_t context, int flags, const dmdrvi_dev_num_t* dev_num ))
 {
+    (void)flags;
+    (void)dev_num; // dmfmc exposes a single, unnumbered device per context
     if (!is_valid_context(context))
     {
         DMOD_LOG_ERROR("Invalid DMDRVI context in dmfmc_dmdrvi_open\n");
@@ -414,36 +426,76 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, void*, _open, ( dmdrvi_context_t con
     return context;
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, void, _close, ( dmdrvi_context_t context, void* handle ))
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, void, _close, ( dmdrvi_context_t context, void* handle ))
 {
     /* No specific action needed to close the FMC device handle */
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, size_t, _read, ( dmdrvi_context_t context, void* handle, void* buffer, size_t size, uint32_t offset ))
+/**
+ * @brief Read from the memory-mapped FMC region
+ *
+ * @param context DMDRVI context
+ * @param handle Device handle (unused - the region is reached via context)
+ * @param buffer Buffer to read data into
+ * @param size Number of bytes to read; values greater than INT64_MAX fail
+ * with -EOVERFLOW because they cannot be represented by dmdrvi_ssize_t
+ * @param offset Non-negative byte offset from the start of the mapped region
+ *
+ * @return dmdrvi_ssize_t Number of bytes read, zero if offset is at or past
+ * the end of the region, or a negative errno-compatible error
+ */
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, dmdrvi_ssize_t, _read, ( dmdrvi_context_t context, void* handle, void* buffer, size_t size, dmdrvi_offset_t offset ))
 {
-    if (!is_valid_context(context) || buffer == NULL || offset >= context->result.memory_size_bytes)
+    (void)handle;
+
+    if (offset < 0)
+        return -EINVAL;
+    if (size > (size_t)INT64_MAX)
+        return -EOVERFLOW;
+
+    if (!is_valid_context(context) || buffer == NULL || (dmdrvi_size_t)offset >= (dmdrvi_size_t)context->result.memory_size_bytes)
         return 0;
 
-    size_t available = context->result.memory_size_bytes - offset;
-    size_t to_copy = (size < available) ? size : available;
+    dmdrvi_size_t available = (dmdrvi_size_t)context->result.memory_size_bytes - (dmdrvi_size_t)offset;
+    size_t to_copy = (size < available) ? size : (size_t)available;
 
     memcpy(buffer, (const uint8_t *)context->result.memory_start + offset, to_copy);
-    return to_copy;
+    return (dmdrvi_ssize_t)to_copy;
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, size_t, _write, ( dmdrvi_context_t context, void* handle, const void* buffer, size_t size, uint32_t offset ))
+/**
+ * @brief Write to the memory-mapped FMC region
+ *
+ * @param context DMDRVI context
+ * @param handle Device handle (unused - the region is reached via context)
+ * @param buffer Buffer with data to write
+ * @param size Number of bytes to write; values greater than INT64_MAX fail
+ * with -EOVERFLOW because they cannot be represented by dmdrvi_ssize_t
+ * @param offset Non-negative byte offset from the start of the mapped region
+ *
+ * @return dmdrvi_ssize_t Number of bytes written, zero if offset is at or
+ * past the end of the region, or a negative errno-compatible error
+ */
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, dmdrvi_ssize_t, _write, ( dmdrvi_context_t context, void* handle, const void* buffer, size_t size, dmdrvi_offset_t offset ))
 {
-    if (!is_valid_context(context) || buffer == NULL || offset >= context->result.memory_size_bytes)
+    (void)handle;
+
+    if (offset < 0)
+        return -EINVAL;
+    if (size > (size_t)INT64_MAX)
+        return -EOVERFLOW;
+
+    if (!is_valid_context(context) || buffer == NULL || (dmdrvi_size_t)offset >= (dmdrvi_size_t)context->result.memory_size_bytes)
         return 0;
 
-    size_t available = context->result.memory_size_bytes - offset;
-    size_t to_copy = (size < available) ? size : available;
+    dmdrvi_size_t available = (dmdrvi_size_t)context->result.memory_size_bytes - (dmdrvi_size_t)offset;
+    size_t to_copy = (size < available) ? size : (size_t)available;
 
     memcpy((uint8_t *)context->result.memory_start + offset, buffer, to_copy);
-    return to_copy;
+    return (dmdrvi_ssize_t)to_copy;
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, int, _ioctl, ( dmdrvi_context_t context, void* handle, int command, void* arg ))
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, int, _ioctl, ( dmdrvi_context_t context, void* handle, int command, void* arg ))
 {
     if (!is_valid_context(context))
     {
@@ -507,7 +559,7 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, int, _ioctl, ( dmdrvi_context_t cont
     }
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, int, _flush, ( dmdrvi_context_t context, void* handle ))
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, int, _flush, ( dmdrvi_context_t context, void* handle ))
 {
     if (!is_valid_context(context))
     {
@@ -519,7 +571,7 @@ dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, int, _flush, ( dmdrvi_context_t cont
     return 0;
 }
 
-dmod_dmdrvi_dif_api_declaration(1.0, dmfmc, int, _stat, ( dmdrvi_context_t context, const char* path, dmdrvi_stat_t* stat ))
+dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, int, _stat, ( dmdrvi_context_t context, const char* path, dmdrvi_stat_t* stat ))
 {
     if (!is_valid_context(context) || stat == NULL)
     {
