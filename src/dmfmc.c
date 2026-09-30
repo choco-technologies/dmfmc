@@ -10,6 +10,11 @@
 #include <errno.h>
 #include <string.h>
 
+#ifdef DMDRVI_IOCTL_CUSTOM_BASE
+_Static_assert(dmfmc_ioctl_cmd_get_memory_start == DMDRVI_IOCTL_CUSTOM_BASE,
+               "dmfmc private ioctl commands must start at DMDRVI_IOCTL_CUSTOM_BASE");
+#endif
+
 #define DMFMC_CONTEXT_MAGIC    0x444D4643  /* 'DMFC' */
 
 /**
@@ -503,10 +508,12 @@ dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, int, _ioctl, ( dmdrvi_context_t cont
         return -EINVAL;
     }
 
-    if (command >= dmfmc_ioctl_cmd_max)
+    /* Not an error: generic clients (e.g. dmdevfs probing every node for the
+     * block/monitor classes) send standard DMDRVI_IOCTL_* commands the FMC
+     * does not implement - answer -ENOTTY quietly, as dmdrvi expects. */
+    if (command < dmfmc_ioctl_cmd_get_memory_start || command >= dmfmc_ioctl_cmd_max)
     {
-        DMOD_LOG_ERROR("Invalid ioctl command %d\n", command);
-        return -EINVAL;
+        return -ENOTTY;
     }
 
     switch (command)
@@ -555,7 +562,7 @@ dmod_dmdrvi_dif_api_declaration(2.0, dmfmc, int, _ioctl, ( dmdrvi_context_t cont
             return configure(context);
 
         default:
-            return -EINVAL;
+            return -ENOTTY;
     }
 }
 
