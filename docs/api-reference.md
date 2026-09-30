@@ -18,6 +18,11 @@ usable either directly or transparently through `dmdevfs`/`/dev`.
 
 ## IOCTL commands (`dmfmc_ioctl_cmd_t`)
 
+Commands are numbered from `DMDRVI_IOCTL_CUSTOM_BASE` so they do not
+collide with the standard `DMDRVI_IOCTL_*` commands. Any command outside this
+range (e.g. the `DMDRVI_IOCTL_BLOCK_GET_INFO` / `DMDRVI_IOCTL_MONITOR_GET_POLICY`
+probes sent by dmdevfs) is answered with `-ENOTTY`.
+
 | Command | `arg` type | Meaning |
 |---------|-----------|---------|
 | `dmfmc_ioctl_cmd_get_memory_start` | `void **` | Direct pointer to the mapped memory. |
