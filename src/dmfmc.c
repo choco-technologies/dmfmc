@@ -10,11 +10,6 @@
 #include <errno.h>
 #include <string.h>
 
-#ifdef DMDRVI_IOCTL_CUSTOM_BASE
-_Static_assert(dmfmc_ioctl_cmd_get_memory_start == DMDRVI_IOCTL_CUSTOM_BASE,
-               "dmfmc private ioctl commands must start at DMDRVI_IOCTL_CUSTOM_BASE");
-#endif
-
 #define DMFMC_CONTEXT_MAGIC    0x444D4643  /* 'DMFC' */
 
 /**

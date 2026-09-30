@@ -18,7 +18,7 @@ usable either directly or transparently through `dmdevfs`/`/dev`.
 
 ## IOCTL commands (`dmfmc_ioctl_cmd_t`)
 
-Commands are numbered from `DMDRVI_IOCTL_CUSTOM_BASE` (0x1000) so they do not
+Commands are numbered from `DMDRVI_IOCTL_CUSTOM_BASE` so they do not
 collide with the standard `DMDRVI_IOCTL_*` commands. Any command outside this
 range (e.g. the `DMDRVI_IOCTL_BLOCK_GET_INFO` / `DMDRVI_IOCTL_MONITOR_GET_POLICY`
 probes sent by dmdevfs) is answered with `-ENOTTY`.

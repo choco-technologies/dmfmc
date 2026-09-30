@@ -2,6 +2,7 @@
 #define DMFMC_TYPES_H
 
 #include <stdint.h>
+#include "dmdrvi_ioctl.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -185,10 +186,10 @@ typedef enum
  */
 typedef enum
 {
-    /* Private commands start at DMDRVI_IOCTL_CUSTOM_BASE (0x1000, dmdrvi_ioctl.h)
+    /* Private commands start at DMDRVI_IOCTL_CUSTOM_BASE (dmdrvi_ioctl.h)
      * so they never collide with the standard DMDRVI_IOCTL_* commands (network,
      * block, monitor) that dmdevfs and other generic clients send to any node. */
-    dmfmc_ioctl_cmd_get_memory_start = 0x1000, /**< arg = void** - direct pointer to the mapped memory */
+    dmfmc_ioctl_cmd_get_memory_start = DMDRVI_IOCTL_CUSTOM_BASE, /**< arg = void** - direct pointer to the mapped memory */
     dmfmc_ioctl_cmd_get_memory_size,        /**< arg = uint32_t* - size in bytes of the mapped memory */
     dmfmc_ioctl_cmd_get_configured_frequency, /**< arg = uint32_t* - SDCLK frequency actually configured (Hz) */
     dmfmc_ioctl_cmd_get_heap_context,       /**< arg = dmheap_context_t** - heap context, or NULL if not used as heap */
