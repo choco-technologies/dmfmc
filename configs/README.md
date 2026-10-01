@@ -21,17 +21,19 @@ config would not be meaningful. Configs live only under `board/`.
 
 Each config file contains:
 - One `[sdram_*]` GPIO section per FMC signal pin (`driver_name=dmgpio`,
-  alternate function mode), with `driver_order=1` so they configure first.
-- One driver section with `driver_name=dmfmc` and `driver_order=2`, so
+  alternate function mode), with `driver_order=-9` so they configure first.
+- One driver section with `driver_name=dmfmc` and `driver_order=-8`, so
   `dmdevfs` configures every pin before bringing up the FMC controller
-  itself - the same convention `dmuart` uses for its TX/RX pins.
+  itself - the same convention `dmuart` uses for its TX/RX pins. Both orders
+  are negative so the SDRAM heap is up right after `dmclk` (`driver_order=-10`)
+  and before any driver with the default order 0 starts allocating from DTCM.
 
 ### Example (stm32f746g-disco/sdram.ini, abridged)
 
 ```ini
 [sdram_sdclk]
 driver_name=dmgpio
-driver_order=1
+driver_order=-9
 pin=PG8
 mode=alternate
 alternate_function=12
@@ -44,7 +46,7 @@ output_circuit=push_pull
 
 [sdram]
 driver_name=dmfmc
-driver_order=2
+driver_order=-8
 memory_type=sdram
 chip=MT48LC4M32B2
 bank=1

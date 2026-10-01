@@ -6,7 +6,7 @@ and a complete board example. Summary:
 ```ini
 [sdram]
 driver_name=dmfmc
-driver_order=2          ; must come after every dmgpio pin section for this bus
+driver_order=-8         ; must come after every dmgpio pin section for this bus
 memory_type=sdram       ; sdram | psram | nor | nand (only sdram is implemented)
 chip=MT48LC4M32B2       ; looked up via dmfmc_chips_find()
 bank=1                  ; 1 or 2 (FMC SDRAM bank)
