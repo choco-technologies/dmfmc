@@ -14,6 +14,7 @@ data_bus_width=32       ; 0 (chip default), 8, 16 or 32
 timeout_ms=3000         ; upper bound on the whole configuration sequence
 heap_usage=heap         ; none | heap
 heap_alignment=4        ; only used when heap_usage=heap
+cache=on                ; on (default) | off - let the CPU cache the memory
 interrupt_handler=my_handler  ; optional dmhaman handler name for refresh-error events
 ```
 

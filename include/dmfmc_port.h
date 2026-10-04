@@ -34,6 +34,16 @@ dmod_dmfmc_port_api(1.0, int, _sdram_send_command,
 dmod_dmfmc_port_api(1.0, int, _finish_sdram_initialization,
     ( dmfmc_sdram_bank_t bank, const dmfmc_sdram_chip_params_t *chip ) );
 
+/**
+ * Lets the CPU cache the SDRAM window (write-back) once it is verified. The
+ * port checks the memory through the cache - patterns written into the
+ * cache, cleaned to the SDRAM and read back from it - and leaves the window
+ * uncached when that fails. A core without a data cache only gets the
+ * attributes. Returns 0, or -EIO when the check failed.
+ */
+dmod_dmfmc_port_api(1.0, int, _cache_sdram,
+    ( dmfmc_sdram_bank_t bank, void *start, uint32_t size ) );
+
 /* --- NOR / NAND / PSRAM configuration ---
  *
  * Declared for API completeness; the STM32 port currently returns -ENOSYS

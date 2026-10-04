@@ -76,7 +76,16 @@ them in file order before configuring `dmfmc`, exactly like it does for
    the problem instead of working around it.
 6. `dmfmc_port_finish_sdram_initialization()` programs the refresh timer
    (`FMC_SDRTR`) from the chip's `auto_refresh_period_us`.
-7. If `heap_usage=heap`, the mapped region is handed to `dmheap_init()` as a
+7. With `cache=on` (the default) `dmfmc_port_cache_sdram()` makes the window
+   cacheable (MPU: Normal, write-back, read/write allocate) and checks it
+   through the data cache: 64 KiB of patterns written into the cache,
+   cleaned to the SDRAM, invalidated and read back from it, twice. When that
+   fails, the window is made uncached again, as it is during bring-up. On a
+   Cortex-M7 the caches are what makes code and data in the SDRAM fast - the
+   drivers that let other bus masters see cached memory clean and invalidate
+   it by address (dmsdio, dmlcdtft). Without a data cache (or with it off)
+   only the attributes are set.
+8. If `heap_usage=heap`, the mapped region is handed to `dmheap_init()` as a
    brand new heap context (dmheap supports any number of independent
    contexts - see its README for the same `kernel_ctx`/`extram_ctx` pattern).
 
