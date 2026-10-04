@@ -16,6 +16,7 @@ typedef struct
     uint32_t                 configuration_timeout_ms;  /**< Maximum time allowed for the whole configuration sequence */
     dmfmc_heap_usage_t       heap_usage;                /**< Whether to register the mapped memory with dmheap */
     uint32_t                 heap_alignment;            /**< Alignment to use when registering the dmheap context */
+    bool                     cache;                     /**< Let the CPU cache the memory (cache=on, the default) */
     dmfmc_interrupt_handler_t interrupt_handler;        /**< Interrupt handler (NULL = not used) */
 } dmfmc_config_t;
 

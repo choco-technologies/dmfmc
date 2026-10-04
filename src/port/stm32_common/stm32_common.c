@@ -182,30 +182,41 @@ static uint32_t pick_cas_latency_cycles(const dmfmc_sdram_chip_params_t *chip, u
  * whatever a future user of the MPU picks first. */
 #define DMFMC_MPU_SDRAM_REGION  6U
 
+/* MPU attributes of the SDRAM window (RASR TEX/C/B) */
+#define MPU_RASR_ATTR_Msk       ((7U << 19) | (1U << 17) | (1U << 16))
+#define MPU_RASR_NONCACHEABLE   (1U << 19)                              /* TEX=001 C=0 B=0: Normal, non-cacheable */
+#define MPU_RASR_WRITE_BACK     ((1U << 19) | (1U << 17) | (1U << 16))  /* TEX=001 C=1 B=1: Normal, write-back, read/write allocate */
+
+/* Cortex-M7 data cache (SCB) - CCR.DC is 0 on a core without one */
+#define SCB_CCR                 (*(volatile uint32_t *)0xE000ED14UL)
+#define SCB_CCR_DC              (1UL << 16)
+#define SCB_DCIMVAC             (*(volatile uint32_t *)0xE000EF5CUL)   /* invalidate by address */
+#define SCB_DCCMVAC             (*(volatile uint32_t *)0xE000EF68UL)   /* clean by address */
+#define SCB_DCCIMVAC            (*(volatile uint32_t *)0xE000EF70UL)   /* clean and invalidate by address */
+#define DCACHE_LINE             32U
+
+/* Bytes of the SDRAM checked through the cache - many times the data cache,
+ * so the patterns are evicted to the SDRAM in bursts as well as cleaned */
+#define CACHE_CHECK_SIZE        (64U * 1024U)
+
 /**
- * @brief Mark the FMC SDRAM window as Normal, non-cacheable, non-bufferable
- * memory via the MPU.
+ * @brief Mark the FMC SDRAM window as Normal, non-cacheable memory via the
+ * MPU - until it is verified (see dmfmc_port_cache_sdram()).
  *
  * Without an explicit MPU region, this address range falls back to the
- * Cortex-M7 default background map, and on this core/board combination that
- * turned out to allow the store buffer to merge/reorder back-to-back writes
- * to nearby addresses in this window - only the last of several rapid
- * consecutive writes actually reached the SDRAM, exactly the "every word
- * reads back as the last one written" corruption this driver hit during
- * bring-up. B=0 (non-bufferable) forces every store to complete, in order,
- * before the next one begins, which is what actually fixed that corruption.
+ * Cortex-M7 default background map (0xC0000000: Device memory). During
+ * bring-up, writes then seemed to get lost - "every word reads back as the
+ * last one written"; the bank target bits of the commands were swapped
+ * (FMC_SDCMR CTB1/CTB2) and the SDRAM clock was too fast for RBURST at the
+ * time, and the region was made non-bufferable as well. With those fixed,
+ * the memory holds data through the cache, which dmfmc_port_cache_sdram()
+ * checks before it turns caching on.
  *
- * This region was originally configured as Strongly Ordered (TEX=000) for
- * the same B=0/C=0 effect, but ARMv7-M forbids *any* unaligned access to
- * Strongly-Ordered (or Device) memory - it hard-faults, always, regardless
- * of the core's normal (non-trapping) unaligned-access support for Normal
- * memory. That bit us for real once SDRAM was registered as a dmheap
- * default context: dmod's module loader parses loaded modules' internal
- * structures (headers/footers) with plain struct-pointer dereferences that
- * do not guarantee 4-byte alignment of every field, and a module placed in
- * this SDRAM region hit exactly that fault. TEX=001 (Normal, non-cacheable)
- * keeps the same non-bufferable/non-cacheable guarantees while permitting
- * unaligned accesses.
+ * TEX=001 (Normal) rather than Strongly Ordered: ARMv7-M forbids *any*
+ * unaligned access to Strongly-Ordered (or Device) memory - it hard-faults,
+ * always - and dmod's module loader parses loaded modules' internal
+ * structures with plain struct-pointer dereferences that do not guarantee
+ * 4-byte alignment of every field.
  *
  * Safe to call unconditionally: if the MPU is already enabled by someone
  * else, only a new region is added; if it is not yet enabled, it is enabled
@@ -221,10 +232,7 @@ static void configure_sdram_mpu_region(void)
     MPU_RBAR = STM32_FMC_SDRAM_BANK1_BASE; /* 16MB-aligned; region selected via RNR, so VALID/REGION bits stay 0 */
     MPU_RASR = (1U << 0)      /* ENABLE */
              | (23U << 1)     /* SIZE: 2^(23+1) = 16 MiB, covers this bank's chip capacity */
-             | (0U << 16)     /* B = 0: non-bufferable */
-             | (0U << 17)     /* C = 0: non-cacheable */
-             | (0U << 18)     /* S = 0 */
-             | (1U << 19)     /* TEX = 001 -> with C=B=0, Normal non-cacheable (permits unaligned access, unlike Strongly Ordered) */
+             | MPU_RASR_NONCACHEABLE
              | (0x3U << 24);  /* AP = 011: full read/write access, any privilege level.
                                 * XN deliberately left 0 (executable): when this SDRAM is
                                 * registered as a dmheap default context, dmod's own module
@@ -236,6 +244,53 @@ static void configure_sdram_mpu_region(void)
 
     if ((MPU_CTRL & 0x1U) == 0U)
         MPU_CTRL |= (1U << 0) | (1U << 2); /* ENABLE | PRIVDEFENA */
+    __asm volatile ("dsb" ::: "memory");
+    __asm volatile ("isb" ::: "memory");
+}
+
+static void set_sdram_attributes(uint32_t attributes)
+{
+    MPU_RNR  = DMFMC_MPU_SDRAM_REGION;
+    MPU_RASR = (MPU_RASR & ~MPU_RASR_ATTR_Msk) | attributes;
+    __asm volatile ("dsb" ::: "memory");
+    __asm volatile ("isb" ::: "memory");
+}
+
+/* `operation` (clean / invalidate by address) on every cache line of the range */
+static void dcache_lines(volatile uint32_t *operation, const void *start, uint32_t size)
+{
+    uintptr_t line = (uintptr_t)start & ~(uintptr_t)(DCACHE_LINE - 1U);
+    uintptr_t end  = (uintptr_t)start + size;
+    __asm volatile ("dsb" ::: "memory");
+    for (; line < end; line += DCACHE_LINE)
+        *operation = (uint32_t)line;
+    __asm volatile ("dsb" ::: "memory");
+}
+
+/* The pattern of word `i` in pass `pass` - different in every word and pass */
+static inline uint32_t check_pattern(uint32_t i, uint32_t pass)
+{
+    uint32_t v = (i + 1U) * 2654435761U;
+    return (pass == 0U) ? v : ~v;
+}
+
+/* Write the patterns through the cache, push them to the SDRAM, forget them
+ * and read them back from it: every word must hold its own pattern */
+static bool check_through_cache(void *start, uint32_t size)
+{
+    volatile uint32_t *words = (volatile uint32_t *)start;
+    uint32_t count = ((size < CACHE_CHECK_SIZE) ? size : CACHE_CHECK_SIZE) / sizeof(uint32_t);
+    bool ok = true;
+    for (uint32_t pass = 0; pass < 2U && ok; pass++)
+    {
+        for (uint32_t i = 0; i < count; i++)
+            words[i] = check_pattern(i, pass);
+        dcache_lines(&SCB_DCCIMVAC, start, count * sizeof(uint32_t));
+        for (uint32_t i = 0; i < count && ok; i++)
+            ok = words[i] == check_pattern(i, pass);
+    }
+    dcache_lines(&SCB_DCCIMVAC, start, count * sizeof(uint32_t));
+    return ok;
 }
 
 dmod_dmfmc_port_api_declaration(1.0, int, _init, ( void ))
@@ -245,6 +300,30 @@ dmod_dmfmc_port_api_declaration(1.0, int, _init, ( void ))
     volatile FMC_RCC_TypeDef *RCC = (FMC_RCC_TypeDef *)STM32_FMC_RCC_BASE;
     RCC->AHB3ENR |= RCC_AHB3ENR_FMCEN;
     (void)RCC->AHB3ENR; /* barrier: ensure the clock is on before the FMC is touched */
+    return 0;
+}
+
+dmod_dmfmc_port_api_declaration(1.0, int, _cache_sdram, ( dmfmc_sdram_bank_t bank, void *start, uint32_t size ))
+{
+    (void)bank;
+    if (MPU_TYPE == 0U || start == NULL)
+        return 0; /* No MPU: the window keeps the default map's attributes */
+
+    set_sdram_attributes(MPU_RASR_WRITE_BACK);
+    if ((SCB_CCR & SCB_CCR_DC) == 0U)
+    {
+        DMOD_LOG_INFO("FMC: SDRAM is cacheable (write-back) - the data cache is off\n");
+        return 0;
+    }
+    if (!check_through_cache(start, size))
+    {
+        /* Nothing of it may stay in the cache once the window is uncached */
+        dcache_lines(&SCB_DCIMVAC, start, (size < CACHE_CHECK_SIZE) ? size : CACHE_CHECK_SIZE);
+        set_sdram_attributes(MPU_RASR_NONCACHEABLE);
+        DMOD_LOG_ERROR("FMC: SDRAM does not hold data written through the cache\n");
+        return -EIO;
+    }
+    DMOD_LOG_INFO("FMC: SDRAM is cached (write-back)\n");
     return 0;
 }
 

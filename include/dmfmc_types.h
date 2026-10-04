@@ -2,9 +2,9 @@
 #define DMFMC_TYPES_H
 
 #include <stdint.h>
-#include "dmdrvi_ioctl.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include "dmdrvi_ioctl.h"
 
 /**
  * @brief Type of memory attached to the FMC

@@ -161,6 +161,7 @@ static int read_config_parameters(dmdrvi_context_t context, dmini_context_t conf
     context->config.configuration_timeout_ms = (uint32_t)dmini_get_int(config, section, "timeout_ms", 3000);
     context->config.heap_usage     = string_to_heap_usage(dmini_get_string(config, section, "heap_usage", "none"));
     context->config.heap_alignment = (uint32_t)dmini_get_int(config, section, "heap_alignment", (int)sizeof(void *));
+    context->config.cache          = strcmp(dmini_get_string(config, section, "cache", "on"), "off") != 0;
     context->config.interrupt_handler = NULL;
 
     const char *chip_name = dmini_get_string(config, section, "chip", NULL);
@@ -280,6 +281,11 @@ static int configure(dmdrvi_context_t context)
         dmfmc_port_unconfigure_sdram(c->bank);
         return ret;
     }
+
+    /* Verified uncached: now let the CPU cache it. The port checks the
+     * memory through the cache too and keeps it uncached if that fails. */
+    if (c->cache && dmfmc_port_cache_sdram(c->bank, context->result.memory_start, context->result.memory_size_bytes) != 0)
+        DMOD_LOG_WARN("FMC: the SDRAM stays uncached\n");
 
     if (context->interrupt_handler_name != NULL)
     {

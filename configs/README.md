@@ -76,6 +76,7 @@ explicitly force 16-bit width for the same reason.
 | `timeout_ms`       | integer                         | `3000`  | Upper bound on the whole configuration sequence. |
 | `heap_usage`       | `none`, `heap`                   | `none`  | `heap` registers the mapped SDRAM as an additional dmheap context. |
 | `heap_alignment`   | integer (bytes)                 | `sizeof(void*)` | Alignment used when registering the dmheap context. |
+| `cache`            | `on` / `off`                    | `on`          | Let the CPU cache the SDRAM (write-back) once it is verified - checked through the cache first, left uncached when that fails. `off` keeps it uncached. |
 | `interrupt_handler`| dmhaman handler name             | -       | Optional: called on SDRAM refresh-error interrupts. |
 
 ## Board Configurations
