@@ -65,6 +65,7 @@ jobs:
           cd build_$BUILD_NAME
 
           cmake .. \
+            -DDMOD_COMPRESSION_METHOD=deflate \
             -DDMOD_MODULE_VERSION="${{ steps.get_version.outputs.version }}" \
             -DDMFMC_MCU_SERIES="${CPU_FAMILY}"
 
