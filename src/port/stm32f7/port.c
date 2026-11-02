@@ -20,6 +20,19 @@ int dmod_deinit(void)
     return 0;
 }
 
+/* AN4861: speculative Cortex-M7 accesses to an unused, reset-enabled
+ * asynchronous bank can stall SDRAM reads long enough to underrun LTDC.
+ * The board explicitly opts in; init() has already enabled the FMC clock.
+ */
+dmod_dmfmc_port_api_declaration(1.0, int, _disable_unused_norsram_bank1, ( void ))
+{
+    STM32_FMC_NORSRAM_BCR1 &= ~FMC_BCR1_MBKEN;
+    (void)STM32_FMC_NORSRAM_BCR1;
+    __asm volatile ("dsb" ::: "memory");
+    __asm volatile ("isb" ::: "memory");
+    return 0;
+}
+
 /* ---- ISR handler ----
  *
  * All register-level logic lives in stm32_common.c, shared with STM32F4

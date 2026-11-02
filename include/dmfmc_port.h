@@ -10,6 +10,14 @@
 dmod_dmfmc_port_api(1.0, int, _init,   ( void ) );
 dmod_dmfmc_port_api(1.0, int, _deinit, ( void ) );
 
+/**
+ * Disable the unused asynchronous NOR/SRAM bank 1 before SDRAM bring-up.
+ * Called only for an explicit board opt-in, after init() enables the FMC
+ * clock. Preserve every other control bit and the separate SDRAM banks.
+ * Returns -ENOTSUP on ports that do not implement this operation.
+ */
+dmod_dmfmc_port_api(1.0, int, _disable_unused_norsram_bank1, ( void ) );
+
 /* --- SDRAM configuration --- */
 
 dmod_dmfmc_port_api(1.0, int, _configure_sdram,
