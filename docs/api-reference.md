@@ -52,6 +52,7 @@ application code directly - only by `dmfmc.c` and `dmfmc_chips.c`.
 | Function | Purpose |
 |----------|---------|
 | `dmfmc_port_init()` / `_deinit()` | Enable/reset the FMC peripheral clock. |
+| `dmfmc_port_disable_unused_norsram_bank1()` | Board opt-in after `_init()`, before SDRAM setup: STM32F7 clears only BCR1.MBKEN of the asynchronous NOR/SRAM bank; STM32F4 returns `-ENOTSUP`. |
 | `dmfmc_port_configure_sdram(bank, data_bus_width, chip, out_result)` | Programs `FMC_SDCRx`/`FMC_SDTRx` from chip timing parameters; reports the configured frequency, CAS latency, and mapped address/size. |
 | `dmfmc_port_unconfigure_sdram(bank)` | Marks the bank unconfigured. |
 | `dmfmc_port_sdram_send_command(bank, command, data, timeout_ms)` | Issues one JEDEC-level command (`FMC_SDCMR`) and waits for `FMC_SDSR.BUSY` to clear. |

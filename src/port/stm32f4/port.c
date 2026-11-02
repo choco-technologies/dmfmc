@@ -5,6 +5,7 @@
 #include "../stm32_common/stm32_common.h"
 #include "port/stm32_common_regs.h"
 #include "port/stm32f4_regs.h"
+#include <errno.h>
 
 /* ---- DMOD lifecycle ---- */
 
@@ -18,6 +19,11 @@ int dmod_deinit(void)
 {
     Dmod_Printf("DMFMC port module deinitialized (STM32F4)\n");
     return 0;
+}
+
+dmod_dmfmc_port_api_declaration(1.0, int, _disable_unused_norsram_bank1, ( void ))
+{
+    return -ENOTSUP;
 }
 
 /* ---- ISR handler ----

@@ -14,6 +14,7 @@ data_bus_width=32       ; 0 (chip default), 8, 16 or 32
 timeout_ms=3000         ; upper bound on the whole configuration sequence
 heap_usage=heap         ; none | heap
 heap_alignment=4        ; only used when heap_usage=heap
+disable_unused_norsram_bank1=0 ; STM32F7 board opt-in; 1 only if this asynchronous bank is unused
 cache=on                ; on (default) | off - let the CPU cache the memory
 interrupt_handler=my_handler  ; optional dmhaman handler name for refresh-error events
 ```
@@ -67,3 +68,19 @@ dmfmc_chip_info_t *table[] = {&dmfmc_chip_info_x}`) - see
 for why: dmod's loader does not relocate pointers baked into a module's
 static data, so both patterns crash as soon as the module loads at an
 address other than the one it was linked for.
+
+## Unused NOR/SRAM bank on STM32F7
+
+On a board without asynchronous memory on NOR/SRAM bank 1, set
+`disable_unused_norsram_bank1=1` (requires dmfmc and dmfmc_port 1.3 or newer).
+The default is `0`, preserving existing board configurations. The STM32F746G-DISCO
+configuration enables it. This is separate from `bank=1`, which selects the
+SDRAM bank; SDRAM remains enabled.
+
+The STM32F7 port clears only BCR1.MBKEN immediately after the FMC clock is
+available, before SDRAM configuration and heap registration. This prevents
+speculative Cortex-M7 accesses to the unused asynchronous bank from stalling
+SDRAM and starving the LTDC, as described in
+[ST AN4861](https://www.st.com/resource/en/application_note/an4861-lcdtft-display-controller-ltdc-on-stm32-mcus-stmicroelectronics.pdf).
+Do not enable it when the board uses NOR/SRAM on this bank. Unsupported ports
+return an error instead of silently ignoring the requested setting.

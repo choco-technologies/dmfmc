@@ -162,6 +162,7 @@ static int read_config_parameters(dmdrvi_context_t context, dmini_context_t conf
     context->config.heap_usage     = string_to_heap_usage(dmini_get_string(config, section, "heap_usage", "none"));
     context->config.heap_alignment = (uint32_t)dmini_get_int(config, section, "heap_alignment", (int)sizeof(void *));
     context->config.cache          = strcmp(dmini_get_string(config, section, "cache", "on"), "off") != 0;
+    context->config.disable_unused_norsram_bank1 = dmini_get_int(config, section, "disable_unused_norsram_bank1", 0) != 0;
     context->config.interrupt_handler = NULL;
 
     const char *chip_name = dmini_get_string(config, section, "chip", NULL);
@@ -250,6 +251,16 @@ static int configure(dmdrvi_context_t context)
     {
         DMOD_LOG_ERROR("FMC: failed to initialize port\n");
         return ret;
+    }
+
+    if (c->disable_unused_norsram_bank1)
+    {
+        ret = dmfmc_port_disable_unused_norsram_bank1();
+        if (ret != 0)
+        {
+            DMOD_LOG_ERROR("FMC: cannot disable unused NOR/SRAM bank 1 (%d)\n", ret);
+            return ret;
+        }
     }
 
     ret = dmfmc_port_configure_sdram(c->bank, c->data_bus_width, &c->chip->params.sdram, &context->result);

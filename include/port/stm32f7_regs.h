@@ -12,4 +12,8 @@
  *   specific HSI/clock default).
  * ====================================================================== */
 
+/* Asynchronous NOR/SRAM bank 1, separate from the SDRAM banks. */
+#define STM32_FMC_NORSRAM_BCR1      (*(volatile uint32_t *)0xA0000000UL)
+#define FMC_BCR1_MBKEN              (1U << 0)
+
 #endif // DMFMC_STM32F7_REGS_H
